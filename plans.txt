@@ -1,0 +1,6 @@
+1.
+	A lot of code in vga.v is scrap, we can't really use it but it could be used as a basis for our next steps.
+	We should remove the fact that datapath uses switches since the rule set should determine the colour of the following rows, not switches. Also x and y coords of the 8x8 screen board we make are going to be constant so theres no need to have a ld_x and ld_y.
+	
+2.
+	We need to program actual modules to replicate the rules of the game and have those rules translate to the database and control for the vga so that we can have the appropriate drawings on screen.
