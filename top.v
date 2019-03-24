@@ -2,6 +2,7 @@
 *	KEY[0] load initial state
 *  KEY[1] load rule set
 *  KEY[2] low synchrounous reset
+*	KEY[3] GO!
 *  SW[8:0] determine display initial state
 *  Sw[...] determine rule set
 */
