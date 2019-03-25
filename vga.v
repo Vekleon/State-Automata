@@ -73,6 +73,7 @@ module vga
 	wire ld_x, ld_y, ld_c, plot;
 	wire [3:0] offset;
     
+	 //MOVED DATAPATH SINCE IN CONTROL
     // Instansiate datapath
 	// datapath d0(...);
 //	datapath d0(	.clk(CLOCK_50),
@@ -92,6 +93,7 @@ module vga
     // Instansiate FSM control
     // control c0(...);
 	 control c0(	.clk(CLOCK_50),
+						.SW(SW[8:0]),
 						.resetn(resetn),
 						.go(~KEY[3]),
 						.ld_init_state(~KEY[0]),
@@ -150,6 +152,7 @@ endmodule
 
 module control(
 	input clk, 
+	input [8:0] SW;
 	input resetn, 
 	input go, 
 	input ld_init_state, ld_rule_set,
@@ -162,11 +165,11 @@ module control(
 	reg [1:0] curr, next;
 	reg [3:0] next_offset;
 	
-	wire [2:0] color;
-	wire [6:0] x_coord, y_coord;
-	wire [6:0] next_x, next_y;
-	wire [5:0] offset;
-	wire [3:0] pixel_offset;
+	wire [2:0] color; //the colour of the panel, current defaults will be (1,1,1) [white] and (1,0,0) [red]
+	wire [6:0] x_coord, y_coord; //the (x,y) 
+	wire [6:0] next_x, next_y; //currently unused and may stay that way
+	wire [5:0] offset; //used to set the appropriate (x,y) of each 4x4 panel
+	wire [3:0] pixel_offset; //used to set the appropriate position of the 4x4 panel
 	
 	//Currently the amount of states needed is unknown
 	localparam 	S_INITIALIZE = 5'd0;
@@ -179,13 +182,14 @@ module control(
 	always @(*)
 	begin
 		case(curr)
-			S_INITIALIZE: next <= (& offset) ? S_WAIT : S_INITIALIZE;
+			S_INITIALIZE: next <= (& offset) ? S_WAIT : S_INITIALIZE; //change state when the entire 8x8 board is made
 			S_WAIT: begin
 				if (ld_init_state == 1)
-					next <= S_LOAD_INIT_STATE;
+					next <= S_LOAD_INIT_STATE; //goto initialize starting state when KEY[0] is pressed 
 				else if(ld_rule_set == 1)
-					next <= S_LOAD_RULE_STATE;
+					next <= S_LOAD_RULE_STATE; //goto load rule state when KEY[1] is pressed
 			end
+			S_LOAD_INIT_STATE: next <= (offset == 3'b111) S_WAIT : S_LOAD_INIT_STATE; //change state when an entire row is drawn
 			//S_LOAD_X: next <= wr_x ? S_LOAD_X : S_WAIT;
 			//S_LOAD_A: next <= go ? S_LOAD_A : S_PLOT;
 			//S_PLOT: next <= (& pixel_offset) ? S_WAIT : S_PLOT;
@@ -225,22 +229,38 @@ module control(
 				else if(offset % 8 == 7)
 					x_coord <= 56;
 				
+				//reset the x to 0 and go to the next y_coord when the right end of the screen is reached
 				if(offset != 0 && offset % 8 == 0)
 					y_coord <= y_coord + 8;
 				plot <= 1'b1;
 			
 				next_offset <= pixel_offset +1;
-				offset <= offset + 1;
+				
+				//increment the offset count by 1 everytime a full 4x4 panel is drawn
+				if(& pixel_offset)
+					offset <= offset + 1;
 			end
 			S_WAIT: begin
+				offset <= 0;
+				x_coord <= 0;
+				y_coord <= 0;
 				//next_offset <= 4'b0000;
 				end
-			S_LOAD_X: begin
-				ld_x <= 1'b1;
+			S_LOAD_INIT_STATE: begin
+				color = 3'b100;
+				plot <= 1'b1;
+				next_offset <= pixel_offset + 1;
+				
+				//increase off set every time a full 4x4 panel is drawn
+				if(& pixel_offset) begin:
+					offset <= offset + 1;
+					x_coord <= x_coord;
 				end
-			S_LOAD_A: begin
-				ld_y <= 1'b1;
-				ld_c <= 1'b1;
+					
+				end
+			S_LOAD_RULE_SET: begin
+				//ld_y <= 1'b1;
+				//ld_c <= 1'b1;
 				end
 			S_PLOT: begin
 				plot <= 1'b1;
@@ -259,7 +279,7 @@ module control(
 	// Changing state
 	always @(posedge clk)
 	begin
-		curr <= resetn ? next : S_WAIT;
+		curr <= resetn ? next : S_INITIALIZE;
 		pixel_offset <= next_offset;
 	end
 	
