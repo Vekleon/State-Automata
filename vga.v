@@ -170,7 +170,7 @@ module control(
 	wire [6:0] next_x, next_y; //currently unused and may stay that way
 	wire [5:0] offset; //used to set the appropriate (x,y) of each 4x4 panel
 	wire [3:0] pixel_offset; //used to set the appropriate position of the 4x4 panel
-	
+	integer counter = 8;
 	//Currently the amount of states needed is unknown
 	localparam 	S_INITIALIZE = 5'd0;
 					S_WAIT = 4'd1,
@@ -244,10 +244,14 @@ module control(
 				offset <= 0;
 				x_coord <= 0;
 				y_coord <= 0;
+				counter <= 8;
 				//next_offset <= 4'b0000;
 				end
 			S_LOAD_INIT_STATE: begin
-				color = 3'b100;
+				if(SW[counter] == 1)
+					color = 3'b100;
+				else
+					color = 3'b111;
 				plot <= 1'b1;
 				next_offset <= pixel_offset + 1;
 				
@@ -255,6 +259,7 @@ module control(
 				if(& pixel_offset) begin:
 					offset <= offset + 1;
 					x_coord <= x_coord;
+					counter <= counter - 1;
 				end
 					
 				end
