@@ -1,3 +1,188 @@
+/*
+*	KEY[0] load initial state
+*  KEY[1] load rule set
+*  KEY[2] low synchrounous reset
+*	KEY[3] GO!
+*  SW[8:0] determine display initial state
+*  Sw[...] determine rule set
+*/
+module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_R, VGA_G, VGA_B);
+	input [3:0] KEY;
+	input [9:0] SW;
+	input CLOCK_50;
+	
+	vga visual(
+		.CLOCK_50(CLOCK_50),
+		.KEY(KEY[3:0]),
+		.SW(SW[9:0]),
+		.VGA_CLK(VGA_CLK),
+		.VGA_SYNC_N(VGA_SYNC_N),
+		.VGA_R(VGA_R),
+		.VGA_G(VGA_G),
+		.VGA_B(VGA_B)
+	);
+	
+endmodule
+
+// Module which handles writing to the VGA based on given inputs.
+// For now, only SW[9:8] function as inputs, and control which
+// ring of the 8x8 pixel board are active and red.
+module vga
+	(
+		CLOCK_50,						//	On Board 50 MHz
+		// Your inputs and outputs heres
+        KEY,
+        SW,
+		// The ports below are for the VGA output.  Do not change.
+		VGA_CLK,   						//	VGA Clock
+		VGA_HS,							//	VGA H_SYNC
+		VGA_VS,							//	VGA V_SYNC
+		VGA_BLANK_N,						//	VGA BLANK
+		VGA_SYNC_N,						//	VGA SYNC
+		VGA_R,   						//	VGA Red[9:0]
+		VGA_G,	 						//	VGA Green[9:0]
+		VGA_B   						//	VGA Blue[9:0]
+	);
+
+	input			CLOCK_50;				//	50 MHz
+	input   [9:0]   SW;
+	input   [3:0]   KEY;
+
+	// Declare your inputs and outputs here
+	// Do not change the following outputs
+	output			VGA_CLK;   				//	VGA Clock
+	output			VGA_HS;					//	VGA H_SYNC
+	output			VGA_VS;					//	VGA V_SYNC
+	output			VGA_BLANK_N;				//	VGA BLANK
+	output			VGA_SYNC_N;				//	VGA SYNC
+	output	[9:0]	VGA_R;   				//	VGA Red[9:0]
+	output	[9:0]	VGA_G;	 				//	VGA Green[9:0]
+	output	[9:0]	VGA_B;   				//	VGA Blue[9:0]
+	
+	wire resetn;
+	assign resetn = KEY[0];
+	
+	// Create the colour, x, y and writeEn wires that are inputs to the controller.
+	wire [2:0] colour;
+	wire [7:0] x;
+	wire [6:0] y;
+	wire writeEn;
+
+	// Create an Instance of a VGA controller - there can be only one!
+	// Define the number of colours as well as the initial background
+	// image file (.MIF) for the controller.
+	vga_adapter VGA(
+			.resetn(resetn),
+			.clock(CLOCK_50),
+			.colour(colour),
+			.x(x),
+			.y(y),
+			.plot(plot),
+			/* Signals for the DAC to drive the monitor. */
+			.VGA_R(VGA_R),
+			.VGA_G(VGA_G),
+			.VGA_B(VGA_B),
+			.VGA_HS(VGA_HS),
+			.VGA_VS(VGA_VS),
+			.VGA_BLANK(VGA_BLANK_N),
+			.VGA_SYNC(VGA_SYNC_N),
+			.VGA_CLK(VGA_CLK));
+		defparam VGA.RESOLUTION = "160x120";
+		defparam VGA.MONOCHROME = "FALSE";
+		defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
+		defparam VGA.BACKGROUND_IMAGE = "black.mif";
+			
+	// Put your code here. Your code should produce signals x,y,colour and writeEn/plot
+	// for the VGA controller, in addition to any other functionality your design may require.
+	wire [63:0] cells;
+	wire ld_x, ld_y, ld_c, plot;
+	
+	// Handles the state of the cells on the board
+	// This is done using the same mechanics that will
+	// be used to display the rows of the automata.
+	ring_writer r0(	.clk(CLOCK_50),
+					.reset_n(resetn),
+					.enable(1'b1),
+					.s(SW[9:8]),
+					.cells(cells));
+	
+	// Takes the output from ring_writer and puts
+	// it to the screen by controlling the vga_adapter
+	// inputs x,y,colour.
+	vga_controller v0(	.clk(CLOCK_50),
+						.reset_n(resetn),
+						.cells(cells),
+						.ld_x(ld_x),
+						.ld_y(ld_y),
+						.ld_c(ld_c),
+						.plot(plot),
+						.c_out(colour),
+						.x_out(x),
+						.y_out(y));
+    
+endmodule
+
+// Given an input of cells, rapidly updates the
+// pixels in the output to display the cells. These
+// outputs should go to the VGA adapter module.
+module vga_controller(
+	input clk, reset_n,
+	input [63:0] cells,
+	
+	output ld_x, ld_y, ld_c, plot
+	output [2:0] c_out,
+	output [6:0] x_out,
+	output [7:0] y_out);
+	
+	reg [2:0] cur_x, cur_y;
+	reg [3:0] offset;
+	
+	reg [2:0] next_x, next_y;
+	reg [3:0] next_off;
+	
+	// Setting output values dependent on internal values
+	assign ld_x = 1;
+	assign ld_y = 1;
+	assign ld_c = 1;
+	assign c_out = cells[{curr_y, curr_x}] ? 3'b100 : 3'b111;
+	assign y_out[6:2] = curr_y[6:2];
+	assign y_out[1:0] = curr_y[1:0] + offset[3:2];
+	assign x_out[7] = 0;
+	assign x_out[6:2] = curr_x[6:2];
+	assign x_out[1:0] = curr_x[1:0] + offset[1:0];
+	
+	// Setting next clock cycle's internal values
+	always @(*) begin
+		next_off = cur_off + 1;
+		if ((& cur_off)) begin
+			next_x = cur_x + 1;
+			if ((& cur_x))
+				next_y = cur_y + 1;
+		end
+	end
+	
+	// Handling controls
+	always @(posedge clk, negedge reset_n) begin
+		if (!reset_n) begin
+			cur_x <= 0;
+			cur_y <= 0;
+			offset <= 0;
+			next_x <= 0;
+			next_y <= 0;
+			next_off <= 0;
+		end
+		else begin
+			cur_x <= next_x;
+			cur_y <= next_y;
+			offset <= next_off;
+		end
+	end
+
+	
+endmodule
+
+// Given inputs for selecting the state of the rings,
+// writes to a board of cells and outputs the current state.
 module ring_writer(
 	input clk, reset_n, enable,
 	input [1:0] s,
@@ -23,6 +208,8 @@ module ring_writer(
 				cells);
 endmodule
 
+// Used to control the state of the board in the
+// ring_writer module. This is an FSA.
 module ring_control(
 
 	input clk, reset_n, enable,
@@ -121,6 +308,11 @@ module ring_control(
 	
 endmodule
 
+// Board of cells, using registers. You can update
+// a row of cells at a time using the inputs:
+// load_r: must be high to write to board
+// r_select: selects row
+// r_val: value to write to the selected row
 module board(
 	input load_r, clk, reset_n
 	input [2:0] r_select,
