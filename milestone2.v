@@ -181,130 +181,179 @@ module vga_controller(
 	
 endmodule
 
-// Given inputs for selecting the state of the rings,
-// writes to a board of cells and outputs the current state.
-module ring_writer(
-	input clk, reset_n, enable,
-	input [1:0] s,
-	output [63:0] cells);
+module select_rate_divider(
+	input en, clk, reset_n,
+	input [1:0] rate_select,
+	output reg out_clk);
 	
-	wire write;
-	wire [2:0] row_select;
-	wire [7:0] row_val;
+	localparam RATE_ZERO_HERTZ = 2'bd0,
+				RATE_HALF_HERTZ = 2'bd1,
+				RATE_ONE_HERTZ = 2'bd2,
+				RATE_TWO_HERTZ = 2'bd3,
+				ONE_HUNDRED_MILLION = 27'd100000000,
+				FIFTY_MILLION = 27'd50000000;
+				TWENTY_FIVE_MILLION = 27'd25000000;
+				
+	wire [1:0] cur_rate;
+	reg [26:0] cur_num;
 	
-	ring_control rc0 (clk,
-						reset_n,
-						enable,
-						s,
-						write,
-						row_select,
-						row_val);
-						
-	board b0 (write,
-				clk,
-				reset_n,
-				row_select,
-				row_val,
-				cells);
+	assign cur_rate = rate_select;
+	
+	always @(posedge clk, negedge reset_n) begin
+		if (en) begin
+			if (!reset_n) begin
+				cur_num <= 0;
+				out_clk <= 0;
+			end
+			else begin
+				cur_num <= cur_num + 1;
+				case (cur_rate)
+					RATE_HALF_HERTZ:
+						if (cur_num >= ONE_HUNDRED_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					RATE_ONE_HERTZ:
+						if (cur_num >= FIFTY_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					RATE_HALF_HERTZ:
+						if (cur_num >= TWENTY_FIVE_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					default:
+						out_clk <= 0
+				endcase
+			end
+		end
+	end
+	
 endmodule
 
-// Used to control the state of the board in the
-// ring_writer module. This is an FSA.
-module ring_control(
+module automaton(
+	input clk, update, reset_n, en, ld_rule, ld_state,
+	input [7:0] load_val,
+	output [63:0] cells);
+	
+	wire load_r;
+	wire [2:0] row_select;
+	wire [7:0] r_val;
+	wire [63:0] board_cells;
+	
+	// Controls
+	board_control c0(	.clk(clk),
+						.reset_n(reset_n),
+						.ld_rule(ld_rule),
+						.ld_state(ld_state),
+						.load_val(rule_val),
+						.board(board_cells),
+						.load_r(load_r),
+						.row_select(row_select),
+						.r_val(r_val));
 
-	input clk, reset_n, enable,
-	input [1:0] s,
-	output reg write,
+	// Datapath
+	board_datapath d0(	.load_r(load_r),
+						.clk(clk | update),
+						.reset_n(reset_n),
+						.r_select(row_select),
+						.r_val(r_val),
+						.cells(board_cells));
+						
+	
+endmodule
+
+module board_datapath(
+	input load_r, clk, reset_n
+	input [2:0] r_select,
+	input [7:0] r_val,
+	output [63:0] cells);
+	
+	board b0(	.load_r(load_r),
+				.clk(clk),
+				.reset_n(reset_n),
+				.r_val(r_val),
+				.cells(cells));
+	
+endmodule
+
+module board_control(
+	input clk, reset_n, ld_rule, ld_state,
+	input [7:0] load_val,
+	input [63:0] board,
+	output reg load_r,
 	output reg [2:0] row_select,
-	output reg [7:0] row_val);
+	output reg [7:0] r_val);
 	
-	reg [1:0] prev_input;
-	reg [2:0] curr, next;
+	reg curr, next;
+	reg [7:0] cur_rule;
 	
-	localparam 	S_WAIT = 0,
-				S_RING_1 = 1,
-				S_RING_2 = 2,
-				S_RING_3 = 3,
-				S_RING_4 = 4;
-
-	// Handling the "next" state
+	wire [7:0] curr_row, row_out;
+	assign curr_row = cells[8 * row_select + 7 : 8 * row_select];
+	
+	localparam S_RUN = 1'b0,
+				S_RESET = 1'b1;
+				
+	state_calculator s0(	.in(cur_row),
+							.rule(cur_rule),
+							.out(row_out));
+	
+	// Handling the next state
 	always @(*) begin
-		case(curr)
-			S_WAIT:
-				if (prev_input != s) begin // Only proceeding if the input has changed
-					case(s)
-						2'b00: next <= S_RING_1_0;
-						2'b01: next <= S_RING_2_0;
-						2'b10: next <= S_RING_3_0;
-						2'b11: next <= S_RING_4_0;
-					endcase
-				end
-			default: begin
-				if (curr != S_RING_1 &
-					curr != S_RING_2 &
-					curr != S_RING_3 &
-					curr != S_RING_4)
-					next <= S_WAIT;
-				else if (row_select == 3'b111)
-					next <= S_WAIT;
-				end
+		case (curr)
+			S_RESET: next <= (row_select == 3'b111) ? S_RUN : S_RESET;
+			S_RUN: next <= (reset_n) ? S_RUN : S_RESET;
+			default: next <= S_RESET;
 		endcase
 	end
 	
-	// Controls for the current state
-	always @(*) begin
+	// Loading a new rule
+	always @(posedge ld_rule)
+		cur_rule <= load_val;
 	
+	// Controls
+	always @(*) begin
+		
 		// Default controls
-		write = 1;
-		row_val = 0;
+		load_r = 1;
 		
-		case(curr)
-			S_WAIT:
-				write <= 0;
-				row_select <= 0;
-			S_RING_1:
-				case (row_select)
-					3'b000: row_val <= 8'b11111111;
-					3'b111: row_val <= 8'b11111111;
-					default: row_val <= 8'b10000001;
-				endcase
-			S_RING_2:
-				case (row_select)
-					3'b000: row_val <= 8'b00000000;
-					3'b001: row_val <= 8'b01111110;
-					3'b110: row_val <= 8'b01111110;
-					3'b111: row_val <= 8'b00000000;
-					default: row_val <= 8'b01000010;
-				endcase
-			S_RING_3:
-				case (row_select)
-					3'b000: row_val <= 8'b00000000;
-					3'b001: row_val <= 8'b00000000;
-					3'b010: row_val <= 8'b00111100;
-					3'b101: row_val <= 8'b00111100;
-					3'b110: row_val <= 8'b00000000;
-					3'b111: row_val <= 8'b00000000;
-					default: row_val <= 8'b00100100;
-				endcase
-			S_RING_4:
-				case (row_select)
-					3'b011: row_val <= 8'b00011000;
-					3'b100: row_val <= 8'b00011000;
-					default: row_val <= 8'b00000000;
-				endcase
-			default:
-				write <= 0;
-				row_select <= 0;
-				row_val <= 0;
+		case (curr)
+			S_RESET: r_val <= (row_select == 3'b000) ? load_val : 8'b00000000;
+			S_RUN: r_val <= row_out;
 		endcase
-		
 	end
 	
-	always @(posegde clk) begin
-		curr <= reset_n ? next : S_WAIT;
-		if (curr != S_WAIT)
-			row_select <= row_select + 1;
+	always @(posedge clk, negedge reset_n) begin
+		if (!reset_n) begin
+			curr <= S_RESET;
+			next <= S_RESET;
+			row_select <= 0;
+		end
+		row_select <= row_select + 1;
+		curr <= next;
 	end
+	
+endmodule
+
+module state_calculator(
+	input [7:0] in, rule,
+	output [7:0] out);
+	
+	assign out[0] = rule[{in[1], in[0], in[7]}];
+	assign out[1] = rule[{in[2], in[1], in[0]}];
+	assign out[2] = rule[{in[3], in[2], in[1]}];
+	assign out[3] = rule[{in[4], in[3], in[2]}];
+	assign out[4] = rule[{in[5], in[4], in[3]}];
+	assign out[5] = rule[{in[6], in[5], in[4]}];
+	assign out[6] = rule[{in[7], in[6], in[5]}];
+	assign out[7] = rule[{in[0], in[7], in[6]}];
 	
 endmodule
 
