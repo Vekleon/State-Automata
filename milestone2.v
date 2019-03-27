@@ -6,12 +6,13 @@
 *  SW[8:0] determine display initial state
 *  Sw[...] determine rule set
 */
-module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_R, VGA_G, VGA_B);
+module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_R, VGA_G, VGA_B, HEX0, HEX1);
 	input [3:0] KEY;
 	input [9:0] SW;
 	input CLOCK_50;
 	
 	wire rate_clock;
+	wire [7:0] cur_rule;
 	wire [63:0] cells;
 	
 	vga visual(
@@ -33,6 +34,7 @@ module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, 
 		.en(1'b1),
 		.ld_rule(KEY[1]),
 		.load_val(SW[7:0]),
+		.curr_rule(curr_rule),
 		.cells(cells));
 		
 	select_rate_divider rate_divider(
@@ -41,12 +43,17 @@ module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, 
 		.reset_n(KEY[0]),
 		.rate_select(SW[9:8]),
 		.out_clk(rate_clock));
+		
+	// So you can see what rule is currently being used :)
+	hex_decoder h0(cur_rule[3:0], HEX0);
+	hex_decoder h1(cur_rule[7:4], HEX1);
 	
 endmodule
 
 module automaton(
 	input clk, update, reset_n, en, ld_rule,
 	input [7:0] load_val,
+	output [7:0] cur_rule,
 	output [63:0] cells);
 	
 	wire load_r;
@@ -60,6 +67,7 @@ module automaton(
 						.ld_rule(ld_rule),
 						.load_val(rule_val),
 						.board(board_cells),
+						.cur_rule(cur_rule),
 						.load_r(load_r),
 						.row_select(row_select),
 						.r_val(r_val));
@@ -300,11 +308,10 @@ module board_control(
 	input clk, reset_n, ld_rule,
 	input [7:0] load_val,
 	input [63:0] board,
+	output reg [7:0] cur_rule,
 	output load_r,
 	output reg [2:0] row_select,
 	output reg [7:0] r_val);
-	
-	reg [7:0] cur_rule;
 	
 	wire [7:0] curr_row, row_out;
 	assign curr_row = board[8 * row_select + 7 : 8 * row_select];
@@ -367,4 +374,31 @@ module board(
 		end
 	end
 
+endmodule
+
+// Self-explanatory
+module hex_decoder(hex_digit, segments);
+    input [3:0] hex_digit;
+    output reg [6:0] segments;
+   
+    always @(*)
+        case (hex_digit)
+            4'h0: segments = 7'b100_0000;
+            4'h1: segments = 7'b111_1001;
+            4'h2: segments = 7'b010_0100;
+            4'h3: segments = 7'b011_0000;
+            4'h4: segments = 7'b001_1001;
+            4'h5: segments = 7'b001_0010;
+            4'h6: segments = 7'b000_0010;
+            4'h7: segments = 7'b111_1000;
+            4'h8: segments = 7'b000_0000;
+            4'h9: segments = 7'b001_1000;
+            4'hA: segments = 7'b000_1000;
+            4'hB: segments = 7'b000_0011;
+            4'hC: segments = 7'b100_0110;
+            4'hD: segments = 7'b010_0001;
+            4'hE: segments = 7'b000_0110;
+            4'hF: segments = 7'b000_1110;   
+            default: segments = 7'h7f;
+        endcase
 endmodule
