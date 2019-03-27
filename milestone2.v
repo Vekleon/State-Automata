@@ -11,8 +11,12 @@ module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, 
 	input [9:0] SW;
 	input CLOCK_50;
 	
+	wire rate_clock;
+	wire [63:0] cells;
+	
 	vga visual(
 		.CLOCK_50(CLOCK_50),
+		.cells(cells),
 		.KEY(KEY[3:0]),
 		.SW(SW[9:0]),
 		.VGA_CLK(VGA_CLK),
@@ -22,6 +26,53 @@ module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, 
 		.VGA_B(VGA_B)
 	);
 	
+	automaton a0(
+		.clk(rate_clock),
+		.update(KEY[3]),
+		.reset_n(KEY[0]),
+		.en(1'b1),
+		.ld_rule(KEY[1]),
+		.load_val(SW[7:0]),
+		.cells(cells));
+		
+	select_rate_divider rate_divider(
+		.en(1'b1),
+		.clk(CLOCK_50),
+		.reset_n(KEY[0]),
+		.rate_select(SW[9:8]),
+		.out_clk(rate_clock));
+	
+endmodule
+
+module automaton(
+	input clk, update, reset_n, en, ld_rule,
+	input [7:0] load_val,
+	output [63:0] cells);
+	
+	wire load_r;
+	wire [2:0] row_select;
+	wire [7:0] r_val;
+	wire [63:0] board_cells;
+	
+	// Controls
+	board_control c0(	.clk(clk | update),
+						.reset_n(reset_n),
+						.ld_rule(ld_rule),
+						.load_val(rule_val),
+						.board(board_cells),
+						.load_r(load_r),
+						.row_select(row_select),
+						.r_val(r_val));
+
+	// Datapath
+	board_datapath d0(	.load_r(load_r),
+						.clk(clk | update),
+						.reset_n(reset_n),
+						.r_select(row_select),
+						.r_val(r_val),
+						.cells(board_cells));
+						
+	
 endmodule
 
 // Module which handles writing to the VGA based on given inputs.
@@ -30,7 +81,8 @@ endmodule
 module vga
 	(
 		CLOCK_50,						//	On Board 50 MHz
-		// Your inputs and outputs heres
+		// Your inputs and outputs here
+		cells,
         KEY,
         SW,
 		// The ports below are for the VGA output.  Do not change.
@@ -49,6 +101,7 @@ module vga
 	input   [3:0]   KEY;
 
 	// Declare your inputs and outputs here
+	input [63:0] cells;
 	// Do not change the following outputs
 	output			VGA_CLK;   				//	VGA Clock
 	output			VGA_HS;					//	VGA H_SYNC
@@ -96,15 +149,6 @@ module vga
 	// for the VGA controller, in addition to any other functionality your design may require.
 	wire [63:0] cells;
 	wire ld_x, ld_y, ld_c, plot;
-	
-	// Handles the state of the cells on the board
-	// This is done using the same mechanics that will
-	// be used to display the rows of the automata.
-	ring_writer r0(	.clk(CLOCK_50),
-					.reset_n(resetn),
-					.enable(1'b1),
-					.s(SW[9:8]),
-					.cells(cells));
 	
 	// Takes the output from ring_writer and puts
 	// it to the screen by controlling the vga_adapter
@@ -238,38 +282,6 @@ module select_rate_divider(
 	
 endmodule
 
-module automaton(
-	input clk, update, reset_n, en, ld_rule, ld_state,
-	input [7:0] load_val,
-	output [63:0] cells);
-	
-	wire load_r;
-	wire [2:0] row_select;
-	wire [7:0] r_val;
-	wire [63:0] board_cells;
-	
-	// Controls
-	board_control c0(	.clk(clk),
-						.reset_n(reset_n),
-						.ld_rule(ld_rule),
-						.ld_state(ld_state),
-						.load_val(rule_val),
-						.board(board_cells),
-						.load_r(load_r),
-						.row_select(row_select),
-						.r_val(r_val));
-
-	// Datapath
-	board_datapath d0(	.load_r(load_r),
-						.clk(clk | update),
-						.reset_n(reset_n),
-						.r_select(row_select),
-						.r_val(r_val),
-						.cells(board_cells));
-						
-	
-endmodule
-
 module board_datapath(
 	input load_r, clk, reset_n
 	input [2:0] r_select,
@@ -285,60 +297,39 @@ module board_datapath(
 endmodule
 
 module board_control(
-	input clk, reset_n, ld_rule, ld_state,
+	input clk, reset_n, ld_rule,
 	input [7:0] load_val,
 	input [63:0] board,
-	output reg load_r,
+	output load_r,
 	output reg [2:0] row_select,
 	output reg [7:0] r_val);
 	
-	reg curr, next;
 	reg [7:0] cur_rule;
 	
 	wire [7:0] curr_row, row_out;
-	assign curr_row = cells[8 * row_select + 7 : 8 * row_select];
-	
-	localparam S_RUN = 1'b0,
-				S_RESET = 1'b1;
+	assign curr_row = board[8 * row_select + 7 : 8 * row_select];
+	assign load_r = 1;
 				
 	state_calculator s0(	.in(cur_row),
 							.rule(cur_rule),
 							.out(row_out));
-	
-	// Handling the next state
-	always @(*) begin
-		case (curr)
-			S_RESET: next <= (row_select == 3'b111) ? S_RUN : S_RESET;
-			S_RUN: next <= (reset_n) ? S_RUN : S_RESET;
-			default: next <= S_RESET;
-		endcase
+			
+	always @(posedge clk, negedge reset_n) begin
+		if (!resetn) begin
+			cur_rule <= 0;
+			row_select <= 0;
+			r_val <= load_val;
+		end
+		else begin
+			r_val <= row_out;
+		end
 	end
 	
-	// Loading a new rule
 	always @(posedge ld_rule)
 		cur_rule <= load_val;
 	
-	// Controls
-	always @(*) begin
-		
-		// Default controls
-		load_r = 1;
-		
-		case (curr)
-			S_RESET: r_val <= (row_select == 3'b000) ? load_val : 8'b00000000;
-			S_RUN: r_val <= row_out;
-		endcase
-	end
-	
-	always @(posedge clk, negedge reset_n) begin
-		if (!reset_n) begin
-			curr <= S_RESET;
-			next <= S_RESET;
-			row_select <= 0;
-		end
+	always @(negedge clk)
 		row_select <= row_select + 1;
-		curr <= next;
-	end
 	
 endmodule
 
