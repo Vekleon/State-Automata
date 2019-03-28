@@ -41,21 +41,14 @@ module milestone2(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_S
 	);
 	
 	automaton a0(
-		.clk(rate_clock),
-		.update(KEY[3]),
-		.reset_n(KEY[0]),
-		.en(1'b1),
-		.ld_rule(KEY[1]),
-		.load_val(SW[7:0]),
-		.cur_rule(curr_rule),
-		.cells(cells));
-		
-	select_rate_divider rate_divider(
-		.en(1'b1),
 		.clk(CLOCK_50),
+		.force_update(KEY[2]),
 		.reset_n(KEY[0]),
+		.ld_rule(KEY[1]),
 		.rate_select(SW[9:8]),
-		.out_clk(rate_clock));
+		.load_val(SW[7:0]),
+		.cur_rule(cur_rule),
+		.cells(cells));
 		
 	// So you can see what rule is currently being used :)
 	hex_decoder h0(cur_rule[3:0], HEX0);
@@ -64,35 +57,47 @@ module milestone2(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_S
 endmodule
 
 module automaton(
-	input clk, update, reset_n, en, ld_rule,
+	input clk, force_update, reset_n, ld_rule,
+	input [1:0] rate_select,
 	input [7:0] load_val,
 	output [7:0] cur_rule,
 	output [63:0] cells);
 	
-	wire load_r;
-	wire [2:0] row_select;
-	wire [7:0] r_val;
+	wire load_r, regular_update;
 	wire [63:0] board_cells;
+	wire [2:0] row_select;
+	wire [7:0] row_val;
 	
-	// Controls
-	board_control c0(	.clk(clk | update),
-						.reset_n(reset_n),
-						.ld_rule(ld_rule),
-						.load_val(rule_val),
-						.board(board_cells),
-						.cur_rule(cur_rule),
-						.load_r(load_r),
-						.row_select(row_select),
-						.r_val(r_val));
-
-	// Datapath
-	board_datapath d0(	.load_r(load_r),
-						.clk(clk | update),
-						.reset_n(reset_n),
-						.r_select(row_select),
-						.r_val(r_val),
-						.cells(board_cells));
-						
+	assign cells = board_cells;
+	
+	select_rate_divider r0(
+		.en(1'b1),
+		.clk(clk),
+		.reset_n(reset_n),
+		.rate_select(rate_select),
+		.out_clk(regular_update));
+	
+	board b0(
+		.load_r(load_r),
+		.clk(clk),
+		.reset_n(reset_n),
+		.r_select(row_select),
+		.r_val(row_val),
+		.cells(board_cells));
+		
+	board_control c0(
+		.clk(clk),
+		.update(regular_update | force_update),
+		.reset_n(reset_n),
+		.ld_rule(ld_rule),
+		.load_val(load_val),
+		.board(board_cells),
+		.cur_state(cur_state),
+		.cur_rule(cur_rule),
+		.load_r(load_r),
+		.row_select(row_select),
+		.r_val(row_val));
+	
 	
 endmodule
 
@@ -239,6 +244,108 @@ module vga_c(
 
 endmodule
 
+// Gives the controls for a given board using internal states
+// ld_rule: Internal rule loads from load_val when high
+module board_control(
+	input clk, update, reset_n, ld_rule,
+	input [7:0] load_val,
+	input [63:0] board,
+	output [2:0] cur_state,
+	output reg [7:0] cur_rule,
+	output reg load_r,
+	output reg [2:0] row_select,
+	output reg [7:0] r_val);
+	
+	reg next_load_r;
+	reg [2:0] curr, next, next_row_select;
+	reg [7:0] next_r_val, next_rule;
+	
+	assign cur_state = curr;
+	
+	wire [7:0] cur_row, cal_row;
+	row_selector r0(board, row_select, cur_row);
+	state_calculator s0(cur_row, cur_rule, cal_row);
+	
+	localparam S_STANDBY = 0,
+				S_UPDATE_ROW_WAIT = 1,
+				S_UPDATE_ROW = 2,
+				S_LOAD_RULE_WAIT = 3,
+				S_LOAD_RULE = 4,
+				S_RESET = 5;
+		
+	// Handling the "next" state
+	always @(*) begin
+		case (curr)
+			S_STANDBY: begin
+				if (update)
+					next <= S_UPDATE_ROW_WAIT;
+				else if (ld_rule)
+					next <= S_LOAD_RULE_WAIT;
+				else
+					next <= S_STANDBY;
+				end
+			S_UPDATE_ROW_WAIT:
+				next <= update ? S_UPDATE_ROW_WAIT : S_UPDATE_ROW;
+			S_UPDATE_ROW:
+				next <= S_STANDBY;
+			S_LOAD_RULE_WAIT:
+				next <= ld_rule ? S_LOAD_RULE_WAIT : S_LOAD_RULE;
+			S_LOAD_RULE:
+				next <= S_STANDBY;
+			S_RESET:
+				next <= S_STANDBY;
+			default:
+				next <= S_STANDBY;
+		endcase
+	end	
+	
+	// Controls for the current state
+	always @(*) begin
+	
+		// Defaults
+		next_load_r = 0;
+		next_row_select = row_select;
+		next_r_val = r_val;
+		next_rule = cur_rule;
+		
+		case (curr)
+			S_UPDATE_ROW: begin
+				next_load_r <= 1;
+				next_row_select <= row_select + 1;
+				next_r_val <= cal_row;
+				end
+			S_LOAD_RULE: begin
+				next_rule <= load_val;
+				end
+			S_RESET: begin
+				next_load_r <= 1;
+				next_row_select <= 0;
+				next_r_val <= load_val;
+				next_rule <= 0;
+				end
+		endcase
+		
+	end
+	
+	// Handling logic for this clock cycle
+	always @(posedge clk, negedge reset_n) begin
+		if (!reset_n) begin
+			curr <= S_RESET;
+			load_r <= 0;
+			row_select <= 0;
+			r_val <= 0;
+			cur_rule <= 0;
+		end else begin
+			row_select <= next_row_select;
+			cur_rule <= next_rule;
+			r_val <= next_r_val;
+			load_r <= next_load_r;
+			curr <= next;
+		end
+	end
+	
+endmodule
+
 module select_rate_divider(
 	input en, clk, reset_n,
 	input [1:0] rate_select,
@@ -287,60 +394,34 @@ module select_rate_divider(
 	
 endmodule
 
-module board_datapath(
+module board(
 	input load_r, clk, reset_n,
 	input [2:0] r_select,
 	input [7:0] r_val,
-	output [63:0] cells);
+	output reg [63:0] cells);
 	
-	board b0(	.load_r(load_r),
-				.clk(clk),
-				.reset_n(reset_n),
-				.r_val(r_val),
-				.cells(cells));
-	
-endmodule
-
-module board_control(
-	input clk, reset_n, ld_rule,
-	input [7:0] load_val,
-	input [63:0] board,
-	output reg [7:0] cur_rule,
-	output load_r,
-	output reg [2:0] row_select,
-	output reg [7:0] r_val);
-	
-	wire [7:0] cur_row, row_out;
-	
-	row_selector r0(
-		.board(board),
-		.row_select(row_select),
-		.row(cur_row));
-		
-	//assign cur_row = board[8 * row_select + 7 : 8 * row_select];
-	assign load_r = 1;
-				
-	state_calculator s0(	.in(cur_row),
-							.rule(cur_rule),
-							.out(row_out));
-							
-	wire [2:0] next_row_select;
-	assign next_row_select = row_select + 1'b1;
-			
 	always @(posedge clk, negedge reset_n) begin
-		if (!reset_n) begin
-			row_select <= 0;
-			r_val <= load_val;
-		end
-		else begin
-			if (ld_rule)
-				cur_rule <= load_val;
-			r_val <= row_out;
-			row_select <= next_row_select;
+		if (!reset_n)
+			cells <= 0;
+		else if (load_r) begin
+			case (r_select)
+				3'b000: cells[7:0] = r_val[7:0];
+				3'b001: cells[15:8] = r_val[7:0];
+				3'b010: cells[23:16] = r_val[7:0];
+				3'b011: cells[31:24] = r_val[7:0];
+				3'b100: cells[39:32] = r_val[7:0];
+				3'b101: cells[47:40] = r_val[7:0];
+				3'b110: cells[55:48] = r_val[7:0];
+				3'b111: cells[63:56] = r_val[7:0];
+			endcase
 		end
 	end
-	
+
 endmodule
+
+/*
+HERE BE HELPER MODULES
+*/
 
 module row_selector(
 	input [63:0] board,
@@ -375,36 +456,6 @@ module state_calculator(
 	assign out[6] = rule[{in[7], in[6], in[5]}];
 	assign out[7] = rule[{in[0], in[7], in[6]}];
 	
-endmodule
-
-// Board of cells, using registers. You can update
-// a row of cells at a time using the inputs:
-// load_r: must be high to write to board
-// r_select: selects row
-// r_val: value to write to the selected row
-module board(
-	input load_r, clk, reset_n,
-	input [2:0] r_select,
-	input [7:0] r_val,
-	output reg [63:0] cells);
-	
-	always @(posedge clk, negedge reset_n) begin
-		if (!reset_n)
-			cells <= 0;
-		else if (load_r) begin
-			case (r_select)
-				3'b000: cells[7:0] = r_val[7:0];
-				3'b001: cells[15:8] = r_val[7:0];
-				3'b010: cells[23:16] = r_val[7:0];
-				3'b011: cells[31:24] = r_val[7:0];
-				3'b100: cells[39:32] = r_val[7:0];
-				3'b101: cells[47:40] = r_val[7:0];
-				3'b110: cells[55:48] = r_val[7:0];
-				3'b111: cells[63:56] = r_val[7:0];
-			endcase
-		end
-	end
-
 endmodule
 
 // Self-explanatory
