@@ -31,17 +31,6 @@ module vga_c(
 	assign ld_c = 1;
 	assign plot = 1;
 	
-	/*
-	// Setting next clock cycle's internal values
-	always @(*) begin
-		next_off = offset + 1;
-		if ((& offset)) begin
-			next_x = cur_x + 1;
-			if ((& cur_x))
-				next_y = cur_y + 1;
-		end
-	end*/
-	
 	// Handling controls
 	always @(posedge clk, negedge reset_n) begin
 		if (!reset_n) begin
