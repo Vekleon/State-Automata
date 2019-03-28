@@ -226,10 +226,10 @@ module ring_control(
 			S_WAIT:
 				if (prev_input != s) begin // Only proceeding if the input has changed
 					case(s)
-						2'b00: next <= S_RING_1_0;
-						2'b01: next <= S_RING_2_0;
-						2'b10: next <= S_RING_3_0;
-						2'b11: next <= S_RING_4_0;
+						2'b00: next <= S_RING_1;
+						2'b01: next <= S_RING_2;
+						2'b10: next <= S_RING_3;
+						2'b11: next <= S_RING_4;
 					endcase
 				end
 			default: begin
