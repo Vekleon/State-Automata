@@ -324,11 +324,8 @@ module board_control(
 							.rule(cur_rule),
 							.out(row_out));
 							
-	reg [2:0] next_row_select;
-	
-	always @(*) begin
-		next_row_select <= row_select + 1;
-	end
+	wire [2:0] next_row_select;
+	assign next_row_select = row_select + 1'b1;
 			
 	always @(posedge clk, negedge reset_n) begin
 		if (!reset_n) begin
@@ -336,13 +333,12 @@ module board_control(
 			r_val <= load_val;
 		end
 		else begin
+			if (ld_rule)
+				cur_rule <= load_val;
 			r_val <= row_out;
 			row_select <= next_row_select;
 		end
 	end
-	
-	always @(posedge ld_rule)
-		cur_rule <= load_val;
 	
 endmodule
 
