@@ -202,28 +202,26 @@ module vga_c(
 	reg [2:0] cur_x, cur_y;
 	reg [3:0] offset;
 	
-	reg [2:0] next_x, next_y;
-	reg [3:0] next_off;
+	wire [2:0] next_x, next_y;
+	wire [3:0] next_off;
 	
-	// Setting output values dependent on internal values
-	assign ld_x = 1;
-	assign ld_y = 1;
-	assign ld_c = 1;
+	// Assigning internal values
+	assign next_off[3:0] = offset[3:0] + 1'b1;
+	assign next_x[2:0] = (& offset) ? cur_x[2:0] + 1'b1 : cur_x[2:0];
+	assign next_y[2:0] = ((& offset) & !(| next_x)) ? cur_y[2:0] + 1'b1 : cur_y[2:0];
+	
+	// Setting the important output values
 	assign c_out = cells[{cur_y, cur_x}] ? 3'b100 : 3'b111;
 	assign y_out[6:5] = 0;
 	assign y_out[4:0] = {cur_y[2:0], offset[3:2]};
 	assign x_out[7:5] = 0;
 	assign x_out[4:0] = {cur_x[2:0], offset[1:0]};
 	
-	// Setting next clock cycle's internal values
-	always @(*) begin
-		next_off = offset + 1;
-		if ((& offset)) begin
-			next_x = cur_x + 1;
-			if ((& cur_x))
-				next_y = cur_y + 1;
-		end
-	end
+	// Duh
+	assign ld_x = 1;
+	assign ld_y = 1;
+	assign ld_c = 1;
+	assign plot = 1;
 	
 	// Handling controls
 	always @(posedge clk, negedge reset_n) begin
@@ -239,7 +237,6 @@ module vga_c(
 		end
 	end
 
-	
 endmodule
 
 module select_rate_divider(

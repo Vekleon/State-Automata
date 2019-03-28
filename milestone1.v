@@ -109,57 +109,54 @@ module vga
 	// Takes the output from ring_writer and puts
 	// it to the screen by controlling the vga_adapter
 	// inputs x,y,colour.
-	vga_controller v0(	.clk(CLOCK_50),
-						.reset_n(resetn),
-						.cells(cells),
-						.ld_x(ld_x),
-						.ld_y(ld_y),
-						.ld_c(ld_c),
-						.plot(plot),
-						.c_out(colour),
-						.x_out(x),
-						.y_out(y));
+	vga_c v0(	.clk(CLOCK_50),
+				.reset_n(resetn),
+				.cells(cells),
+				.ld_x(ld_x),
+				.ld_y(ld_y),
+				.ld_c(ld_c),
+				.plot(plot),
+				.c_out(colour),
+				.x_out(x),
+				.y_out(y));
     
 endmodule
 
 // Given an input of cells, rapidly updates the
 // pixels in the output to display the cells. These
 // outputs should go to the VGA adapter module.
-module vga_controller(
+module vga_c(
 	input clk, reset_n,
 	input [63:0] cells,
 	
-	output ld_x, ld_y, ld_c, plot
+	output ld_x, ld_y, ld_c, plot,
 	output [2:0] c_out,
-	output [6:0] x_out,
-	output [7:0] y_out);
+	output [7:0] x_out,
+	output [6:0] y_out);
 	
 	reg [2:0] cur_x, cur_y;
 	reg [3:0] offset;
 	
-	reg [2:0] next_x, next_y;
-	reg [3:0] next_off;
+	wire [2:0] next_x, next_y;
+	wire [3:0] next_off;
 	
-	// Setting output values dependent on internal values
+	// Assigning internal values
+	assign next_off[3:0] = offset[3:0] + 1'b1;
+	assign next_x[2:0] = (& offset) ? cur_x[2:0] + 1'b1 : cur_x[2:0];
+	assign next_y[2:0] = ((& offset) & !(| next_x)) ? cur_y[2:0] + 1'b1 : cur_y[2:0];
+	
+	// Setting the important output values
+	assign c_out = cells[{cur_y, cur_x}] ? 3'b100 : 3'b111;
+	assign y_out[6:5] = 0;
+	assign y_out[4:0] = {cur_y[2:0], offset[3:2]};
+	assign x_out[7:5] = 0;
+	assign x_out[4:0] = {cur_x[2:0], offset[1:0]};
+	
+	// Duh
 	assign ld_x = 1;
 	assign ld_y = 1;
 	assign ld_c = 1;
-	assign c_out = cells[{curr_y, curr_x}] ? 3'b100 : 3'b111;
-	assign y_out[6:2] = curr_y[6:2];
-	assign y_out[1:0] = curr_y[1:0] + offset[3:2];
-	assign x_out[7] = 0;
-	assign x_out[6:2] = curr_x[6:2];
-	assign x_out[1:0] = curr_x[1:0] + offset[1:0];
-	
-	// Setting next clock cycle's internal values
-	always @(*) begin
-		next_off = cur_off + 1;
-		if ((& cur_off)) begin
-			next_x = cur_x + 1;
-			if ((& cur_x))
-				next_y = cur_y + 1;
-		end
-	end
+	assign plot = 1;
 	
 	// Handling controls
 	always @(posedge clk, negedge reset_n) begin
@@ -167,9 +164,6 @@ module vga_controller(
 			cur_x <= 0;
 			cur_y <= 0;
 			offset <= 0;
-			next_x <= 0;
-			next_y <= 0;
-			next_off <= 0;
 		end
 		else begin
 			cur_x <= next_x;
@@ -178,7 +172,6 @@ module vga_controller(
 		end
 	end
 
-	
 endmodule
 
 // Given inputs for selecting the state of the rings,
