@@ -1,12 +1,12 @@
 vlib work
 vlog -timescale 1ps/1ps board.v
-vsim -L altera_mf doard
+vsim board
 log {/*}
 add wave {/*}
 
 # Initial values
 force {reset_n} 1
-force {load_r} 0
+force {load_r} 1
 force {r_select} 2#000
 force {r_val} 2#00000000
 
