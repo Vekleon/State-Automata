@@ -6,7 +6,7 @@
 *  SW[8:0] determine display initial state
 *  Sw[...] determine rule set
 */
-module milestone2(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_R, VGA_G, VGA_B, HEX0, HEX1);
+module top(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_R, VGA_G, VGA_B, HEX0, HEX1);
 	input [3:0] KEY;
 	input [9:0] SW;
 	input CLOCK_50;
@@ -15,25 +15,12 @@ module milestone2(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_S
 	wire [7:0] cur_rule;
 	wire [63:0] cells;
 	
-	output			VGA_CLK;   				//	VGA Clock
-	output			VGA_HS;					//	VGA H_SYNC
-	output			VGA_VS;					//	VGA V_SYNC
-	output			VGA_BLANK_N;				//	VGA BLANK
-	output			VGA_SYNC_N;				//	VGA SYNC
-	output	[9:0]	VGA_R;   				//	VGA Red[9:0]
-	output	[9:0]	VGA_G;	 				//	VGA Green[9:0]
-	output	[9:0]	VGA_B;   				//	VGA Blue[9:0]
-	output [6:0] HEX0,HEX1;
-	
 	vga visual(
 		.CLOCK_50(CLOCK_50),
 		.cells(cells),
 		.KEY(KEY[3:0]),
 		.SW(SW[9:0]),
 		.VGA_CLK(VGA_CLK),
-		.VGA_HS(VGA_HS),
-		.VGA_VS(VGA_VS),
-		.VGA_BLANK_N(VGA_BLANK_N),
 		.VGA_SYNC_N(VGA_SYNC_N),
 		.VGA_R(VGA_R),
 		.VGA_G(VGA_G),
@@ -47,7 +34,7 @@ module milestone2(SW, KEY, CLOCK_50, VGA_CLK, VGA_HS, VGA_VS, VGA_BLANK_N, VGA_S
 		.en(1'b1),
 		.ld_rule(KEY[1]),
 		.load_val(SW[7:0]),
-		.cur_rule(curr_rule),
+		.curr_rule(curr_rule),
 		.cells(cells));
 		
 	select_rate_divider rate_divider(
@@ -174,7 +161,7 @@ module vga
 	// Takes the output from ring_writer and puts
 	// it to the screen by controlling the vga_adapter
 	// inputs x,y,colour.
-	vga_c v0(	.clk(CLOCK_50),
+	vga_controller v0(	.clk(CLOCK_50),
 						.reset_n(resetn),
 						.cells(cells),
 						.ld_x(ld_x),
@@ -190,14 +177,14 @@ endmodule
 // Given an input of cells, rapidly updates the
 // pixels in the output to display the cells. These
 // outputs should go to the VGA adapter module.
-module vga_c(
+module vga_controller(
 	input clk, reset_n,
 	input [63:0] cells,
 	
-	output ld_x, ld_y, ld_c, plot,
+	output ld_x, ld_y, ld_c, plot
 	output [2:0] c_out,
-	output [7:0] x_out,
-	output [6:0] y_out);
+	output [6:0] x_out,
+	output [7:0] y_out);
 	
 	reg [2:0] cur_x, cur_y;
 	reg [3:0] offset;
@@ -209,16 +196,17 @@ module vga_c(
 	assign ld_x = 1;
 	assign ld_y = 1;
 	assign ld_c = 1;
-	assign c_out = cells[{cur_y, cur_x}] ? 3'b100 : 3'b111;
-	assign y_out[6:5] = 0;
-	assign y_out[4:0] = {cur_y[2:0], offset[3:2]};
-	assign x_out[7:5] = 0;
-	assign x_out[4:0] = {cur_x[2:0], offset[1:0]};
+	assign c_out = cells[{curr_y, curr_x}] ? 3'b100 : 3'b111;
+	assign y_out[6:2] = curr_y[6:2];
+	assign y_out[1:0] = curr_y[1:0] + offset[3:2];
+	assign x_out[7] = 0;
+	assign x_out[6:2] = curr_x[6:2];
+	assign x_out[1:0] = curr_x[1:0] + offset[1:0];
 	
 	// Setting next clock cycle's internal values
 	always @(*) begin
-		next_off = offset + 1;
-		if ((& offset)) begin
+		next_off = cur_off + 1;
+		if ((& cur_off)) begin
 			next_x = cur_x + 1;
 			if ((& cur_x))
 				next_y = cur_y + 1;
@@ -231,6 +219,9 @@ module vga_c(
 			cur_x <= 0;
 			cur_y <= 0;
 			offset <= 0;
+			next_x <= 0;
+			next_y <= 0;
+			next_off <= 0;
 		end
 		else begin
 			cur_x <= next_x;
@@ -247,12 +238,12 @@ module select_rate_divider(
 	input [1:0] rate_select,
 	output reg out_clk);
 	
-	localparam RATE_ZERO_HERTZ = 2'd0,
-				RATE_HALF_HERTZ = 2'd1,
-				RATE_ONE_HERTZ = 2'd2,
-				RATE_TWO_HERTZ = 2'd3,
+	localparam RATE_ZERO_HERTZ = 2'bd0,
+				RATE_HALF_HERTZ = 2'bd1,
+				RATE_ONE_HERTZ = 2'bd2,
+				RATE_TWO_HERTZ = 2'bd3,
 				ONE_HUNDRED_MILLION = 27'd100000000,
-				FIFTY_MILLION = 27'd50000000,
+				FIFTY_MILLION = 27'd50000000;
 				TWENTY_FIVE_MILLION = 27'd25000000;
 				
 	wire [1:0] cur_rate;
@@ -261,47 +252,46 @@ module select_rate_divider(
 	assign cur_rate = rate_select;
 	
 	always @(posedge clk, negedge reset_n) begin
-		if (!reset_n) begin
-			cur_num <= 0;
-			out_clk <= 0;
-		end
-		else if (en) begin
-			cur_num <= cur_num + 1;
-			case (cur_rate)
-				RATE_HALF_HERTZ: begin
-					if (cur_num >= ONE_HUNDRED_MILLION) begin
-						out_clk <= 1;
-						cur_num <= 0;
-					end
-					else
-						out_clk <= 0;
-					end
-				RATE_ONE_HERTZ: begin
-					if (cur_num >= FIFTY_MILLION) begin
-						out_clk <= 1;
-						cur_num <= 0;
-					end
-					else
-						out_clk <= 0;
-					end
-				RATE_HALF_HERTZ: begin
-					if (cur_num >= TWENTY_FIVE_MILLION) begin
-						out_clk <= 1;
-						cur_num <= 0;
-					end
-					else
-						out_clk <= 0;
-					end
-				default:
-					out_clk <= 0;
-			endcase
+		if (en) begin
+			if (!reset_n) begin
+				cur_num <= 0;
+				out_clk <= 0;
+			end
+			else begin
+				cur_num <= cur_num + 1;
+				case (cur_rate)
+					RATE_HALF_HERTZ:
+						if (cur_num >= ONE_HUNDRED_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					RATE_ONE_HERTZ:
+						if (cur_num >= FIFTY_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					RATE_HALF_HERTZ:
+						if (cur_num >= TWENTY_FIVE_MILLION) begin
+							out_clk <= 1
+							cur_num <= 0;
+						end
+						else
+							out_clk <= 0;
+					default:
+						out_clk <= 0
+				endcase
+			end
 		end
 	end
 	
 endmodule
 
 module board_datapath(
-	input load_r, clk, reset_n,
+	input load_r, clk, reset_n
 	input [2:0] r_select,
 	input [7:0] r_val,
 	output [63:0] cells);
@@ -323,59 +313,30 @@ module board_control(
 	output reg [2:0] row_select,
 	output reg [7:0] r_val);
 	
-	wire [7:0] cur_row, row_out;
-	
-	row_selector r0(
-		.board(board),
-		.row_select(row_select),
-		.row(cur_row));
-		
-	//assign cur_row = board[8 * row_select + 7 : 8 * row_select];
+	wire [7:0] curr_row, row_out;
+	assign curr_row = board[8 * row_select + 7 : 8 * row_select];
 	assign load_r = 1;
 				
 	state_calculator s0(	.in(cur_row),
 							.rule(cur_rule),
 							.out(row_out));
-							
-	reg [2:0] next_row_select;
-	
-	always @(*) begin
-		next_row_select <= row_select + 1;
-	end
 			
 	always @(posedge clk, negedge reset_n) begin
-		if (!reset_n) begin
+		if (!resetn) begin
+			cur_rule <= 0;
 			row_select <= 0;
 			r_val <= load_val;
 		end
 		else begin
 			r_val <= row_out;
-			row_select <= next_row_select;
 		end
 	end
 	
 	always @(posedge ld_rule)
 		cur_rule <= load_val;
 	
-endmodule
-
-module row_selector(
-	input [63:0] board,
-	input [2:0] row_select,
-	output reg [7:0] row);
-	
-	always @(*) begin
-		case(row_select)
-			3'd0: row[7:0] = board[7:0];
-			3'd1: row[7:0] = board[15:8];
-			3'd2: row[7:0] = board[23:16];
-			3'd3: row[7:0] = board[31:24];
-			3'd4: row[7:0] = board[39:32];
-			3'd5: row[7:0] = board[47:40];
-			3'd6: row[7:0] = board[55:48];
-			3'd7: row[7:0] = board[63:56];
-		endcase
-	end
+	always @(negedge clk)
+		row_select <= row_select + 1;
 	
 endmodule
 
@@ -400,7 +361,7 @@ endmodule
 // r_select: selects row
 // r_val: value to write to the selected row
 module board(
-	input load_r, clk, reset_n,
+	input load_r, clk, reset_n
 	input [2:0] r_select,
 	input [7:0] r_val,
 	output reg [63:0] cells);
@@ -408,11 +369,8 @@ module board(
 	always @(posedge clk, negedge reset_n) begin
 		if (!reset_n)
 			cells <= 0;
-		else if (load_r) begin
-			integer i;
-			for (i = 0; i < 8; i = i + 1) begin
-				cells[8 * r_select + i] <= r_val[i];
-			end
+		else if (load_r)
+			cells[8 * r_select + 7 : 8 * r_select] <= r_val[7:0];
 		end
 	end
 
