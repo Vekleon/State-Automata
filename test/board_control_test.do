@@ -53,12 +53,60 @@ run 8
 force {rate_select} 2#10
 
 # Letting it run for a bit
-run 512
+run 64
+
+# Letting it run for a bit
+run 64
+
+# Setting rate_select to 1/8 CLOCK_50
+force {rate_select} 2#11
+
+# Letting it run for a bit
+run 64
+
+# Setting rate_select to 0 Hz
+force {rate_select} 2#00
 
 # Resetting, and loading new starting state
-force {load_val} 2#11111111
+force {load_val} 2#01010010
 run 4
 force {reset_n} 0
 run 4
 force {reset_n} 1
 run 16
+
+# Loading a rule (83)
+force {load_val} 2#01010011
+run 4
+force {ld_rule} 1
+run 8
+force {ld_rule} 0
+run 8
+
+# Setting rate_select to 1/4 CLOCK_50
+force {rate_select} 2#10
+
+# Letting it run for a bit
+run 128
+
+# Resetting, and loading new starting state
+force {load_val} 2#01100010
+run 4
+force {reset_n} 0
+run 4
+force {reset_n} 1
+run 16
+
+# Loading a rule (91)
+force {load_val} 2#01011011
+run 4
+force {ld_rule} 1
+run 8
+force {ld_rule} 0
+run 8
+
+# Setting rate_select to 1/4 CLOCK_50
+force {rate_select} 2#10
+
+# Letting it run for a bit
+run 128
