@@ -90,6 +90,7 @@ force {rate_select} 2#10
 run 128
 
 # Resetting, and loading new starting state
+force {rate_select} 2#00
 force {load_val} 2#01100010
 run 4
 force {reset_n} 0
